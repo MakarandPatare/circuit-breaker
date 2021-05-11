@@ -1,19 +1,16 @@
-import java.util.concurrent.{ExecutorService, Executors}
 import java.util.{Timer, TimerTask}
 import java.util.concurrent.atomic.{AtomicInteger, AtomicLong, AtomicReference}
 
 import CircuitState._
 
-import scala.concurrent.{Await, ExecutionContext, Future}
+import scala.concurrent.{ExecutionContext, Future}
 import scala.concurrent.duration.Duration
-import scala.util.{Failure, Success}
-
-//Executors.
-//new ExecutorService()
 
 class Circuit[A](defaultAction: => A, maxAllowedFails: Int, openTime: Duration) (implicit ec: ExecutionContext) {
 
   private val circuitState = new AtomicReference[CircuitState](CircuitState.Closed)
+  def getCircuitState = circuitState.get()
+
   private val closedConsecutiveFailureCount = new AtomicInteger(0)
   private val lastOpenTime = new AtomicLong(Long.MaxValue)
 
