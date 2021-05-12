@@ -17,11 +17,6 @@ class Circuit[A](defaultAction: => A, maxAllowedFails: Int, openTime: Duration) 
 
   def isOpenTimeoutOver: Boolean = System.currentTimeMillis() - lastOpenTime.get() > openTime.toMillis
 
-  /* ToDo: Dependency on the timer can be removed if we check for the timeout
-   *  for each execution with Circuit Breaker in the Open state.
-   *  But in that case, Circuit State won't change automatically after the timeout
-   *  until there is a request to execute with Circuit Breaker
-   */
   new Timer("Open to Half Open after openTime").scheduleAtFixedRate(new TimerTask {
     override def run(): Unit = circuitState.get() match {
       case Open if isOpenTimeoutOver =>
