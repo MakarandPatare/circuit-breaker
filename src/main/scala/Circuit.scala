@@ -11,12 +11,17 @@ class Circuit[A](defaultAction: => A, maxAllowedFails: Int, openTime: Duration) 
   private val circuitState = new AtomicReference[CircuitState](CircuitState.Closed)
   def getCircuitState = circuitState.get()
 
-  private val closedConsecutiveFailureCount = new AtomicInteger(0)
+  private val consecutiveFailureCountInClosedState = new AtomicInteger(0)
   private val lastOpenTime = new AtomicLong(Long.MaxValue)
 
   def isOpenTimeoutOver: Boolean = System.currentTimeMillis() - lastOpenTime.get() > openTime.toMillis
 
-  new Timer(s"circuit-opener").scheduleAtFixedRate(new TimerTask {
+  /* ToDo: Dependency on the timer can be removed if we check for the timeout
+   *  for each execution with Circuit Breaker in the Open state.
+   *  But in that case, Circuit State won't change automatically after the timeout
+   *  until there is a request to execute with Circuit Breaker
+   */
+  new Timer("Open to Half Open after openTime").scheduleAtFixedRate(new TimerTask {
     override def run(): Unit = circuitState.get() match {
       case Open if isOpenTimeoutOver =>
         updateCircuitStateTo(HalfOpen)
@@ -25,15 +30,15 @@ class Circuit[A](defaultAction: => A, maxAllowedFails: Int, openTime: Duration) 
   }, 0L, 10L)
 
   def executeWithCircuitBreaker(program: => Future[A]): Future[A] = circuitState.get() match {
-      case Closed => handleClosedState(program)
+      case Closed =>   handleClosedState(program)
       case HalfOpen => handleHalfOpenState(program)
-      case Open => handleOpenState
+      case Open =>     handleOpenState
     }
 
   def updateCircuitStateTo(state: CircuitState): Unit = state match {
     case Closed => circuitState.set(Closed);
       lastOpenTime.set(Long.MaxValue)
-      closedConsecutiveFailureCount.set(0)
+      consecutiveFailureCountInClosedState.set(0)
     case HalfOpen => circuitState.set(HalfOpen)
     case Open => circuitState.set(Open)
       lastOpenTime.set(System.currentTimeMillis())
@@ -47,33 +52,21 @@ class Circuit[A](defaultAction: => A, maxAllowedFails: Int, openTime: Duration) 
     program.flatMap { value =>
         updateCircuitStateTo(Closed)
         Future.successful(value)
-      }(ec).recoverWith {
-        case _ => handleFailure(program, new AtomicInteger(0), 0)
+      } (ec).recoverWith {
+        case _ => updateCircuitStateTo(Open)
+          handleOpenState
       }
   }
 
   private def handleClosedState(program: => Future[A]): Future[A] = {
      program.flatMap{ value =>
-       closedConsecutiveFailureCount.set(0)
-       Future.successful(value) } (ec)
-       .recoverWith {
-         case _ => handleFailure(program, closedConsecutiveFailureCount, maxAllowedFails)
-    }
-  }
-
-  private def handleFailure(program: => Future[A],
-                                 atomicCounter: AtomicInteger,
-                                 maxFailures: Int): Future[A] = {
-
-    val currentFailureCount = atomicCounter.incrementAndGet()
-
-    if (currentFailureCount > maxFailures) {
-      updateCircuitStateTo(Open)
-      executeWithCircuitBreaker(program) // Doubtful
-    } else {
-      closedConsecutiveFailureCount.addAndGet(1)
-      executeWithCircuitBreaker(program)
-    }
+       consecutiveFailureCountInClosedState.set(0)
+       Future.successful(value)
+     } (ec).recoverWith {
+         case _ => if (consecutiveFailureCountInClosedState.incrementAndGet() >= maxAllowedFails)
+                      updateCircuitStateTo(Open)
+                   Future.successful(defaultAction)
+     }
   }
 
 }

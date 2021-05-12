@@ -8,7 +8,7 @@ class CircuitTest extends FunSpec with Matchers {
   describe("Circuit breaker state changes") {
     it("Successful Invocation - should remain closed") {
 
-      val sampleCircuit: Circuit[Int] = new Circuit[Int](-1, 5, 5.seconds)
+      val sampleCircuit: Circuit[Int] = new Circuit[Int](-1, 5, 0.5.seconds)
 
       val resultsF: Future[Seq[Int]] = Future.sequence((1 to 500).map(_ => {
           sampleCircuit.executeWithCircuitBreaker(Future {2 + 2})}))
@@ -27,7 +27,7 @@ class CircuitTest extends FunSpec with Matchers {
 
       Thread.sleep(100)
       sampleCircuit.getCircuitState should be (CircuitState.Open)
-      Thread.sleep(500)
+      Thread.sleep(600)
       sampleCircuit.getCircuitState should be (CircuitState.HalfOpen)
     }
 
