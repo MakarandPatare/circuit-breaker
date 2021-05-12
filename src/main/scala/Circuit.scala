@@ -1,5 +1,5 @@
 import java.util.{Timer, TimerTask}
-import java.util.concurrent.atomic.{AtomicInteger, AtomicLong, AtomicReference}
+import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger, AtomicLong, AtomicReference}
 
 import CircuitState._
 
@@ -8,9 +8,10 @@ import scala.concurrent.duration.Duration
 
 class Circuit[A](defaultAction: => A, maxAllowedFails: Int, openTime: Duration) (implicit ec: ExecutionContext) {
 
-  private val circuitState = new AtomicReference[CircuitState](CircuitState.Closed)
-  def getCircuitState = circuitState.get()
+  private val circuitState: AtomicReference[CircuitState] = new AtomicReference[CircuitState](CircuitState.Closed)
+  def getCircuitState: CircuitState = circuitState.get()
 
+  private val isHalfStateFirstCall = new AtomicBoolean(true)
   private val consecutiveFailureCountInClosedState = new AtomicInteger(0)
   private val lastOpenTime = new AtomicLong(Long.MaxValue)
 
@@ -29,18 +30,22 @@ class Circuit[A](defaultAction: => A, maxAllowedFails: Int, openTime: Duration) 
     }
   }, 0L, 10L)
 
-  def executeWithCircuitBreaker(program: => Future[A]): Future[A] = circuitState.get() match {
+  def executeWithCircuitBreaker(program: => Future[A]): Future[A] = getCircuitState match {
       case Closed =>   handleClosedState(program)
-      case HalfOpen => handleHalfOpenState(program)
+      case HalfOpen => HalfOpenState.handleHalfOpenState(program)
       case Open =>     handleOpenState
     }
 
   def updateCircuitStateTo(state: CircuitState): Unit = state match {
-    case Closed => circuitState.set(Closed);
+    case Closed =>
+      circuitState.set(Closed)
       lastOpenTime.set(Long.MaxValue)
       consecutiveFailureCountInClosedState.set(0)
-    case HalfOpen => circuitState.set(HalfOpen)
-    case Open => circuitState.set(Open)
+    case HalfOpen =>
+      isHalfStateFirstCall.set(true)
+      circuitState.set(HalfOpen)
+    case Open =>
+      circuitState.set(Open)
       lastOpenTime.set(System.currentTimeMillis())
   }
 
@@ -48,14 +53,22 @@ class Circuit[A](defaultAction: => A, maxAllowedFails: Int, openTime: Duration) 
     Future.successful(defaultAction)
   }
 
-  def handleHalfOpenState(program: => Future[A]): Future[A] = {
-    program.flatMap { value =>
-        updateCircuitStateTo(Closed)
-        Future.successful(value)
-      } (ec).recoverWith {
-        case _ => updateCircuitStateTo(Open)
-          handleOpenState
+  private object HalfOpenState {
+    def handleHalfOpenState(program: => Future[A]): Future[A] = {
+      if (isHalfStateFirstCall.get()) {
+        isHalfStateFirstCall.set(false)
+        program.flatMap { value =>
+          updateCircuitStateTo(Closed)
+          Future.successful(value)
+        }(ec).recoverWith {
+          case _ =>
+            updateCircuitStateTo(Open)
+            handleOpenState
+        }
+      } else {
+        handleOpenState
       }
+    }
   }
 
   private def handleClosedState(program: => Future[A]): Future[A] = {
