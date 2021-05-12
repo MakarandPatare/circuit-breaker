@@ -48,7 +48,7 @@ class Circuit[A](defaultAction: => A, maxAllowedFails: Int, openTime: Duration) 
         updateCircuitStateTo(Closed)
         Future.successful(value)
       }(ec).recoverWith {
-        case _ => handleFailure(program, new AtomicInteger(0), 1)
+        case _ => handleFailure(program, new AtomicInteger(0), 0)
       }
   }
 

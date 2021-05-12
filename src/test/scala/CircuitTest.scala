@@ -5,8 +5,8 @@ import scala.concurrent.{Await, Future}
 
 class CircuitTest extends FunSpec with Matchers {
 
-  describe("Circuit Breaker Closed") {
-    it("Successful Invocation") {
+  describe("Circuit breaker state changes") {
+    it("Successful Invocation - should remain closed") {
 
       val sampleCircuit: Circuit[Int] = new Circuit[Int](-1, 5, 5.seconds)
 
@@ -18,19 +18,75 @@ class CircuitTest extends FunSpec with Matchers {
       sampleCircuit.getCircuitState should be (CircuitState.Closed)
     }
 
-    it("Failures more than threshold") {
-      val sampleCircuit: Circuit[Int] = new Circuit[Int](-1, 5, 5.seconds)
+    it("should change from Open to HalfOpen") {
+      val sampleCircuit: Circuit[Int] = new Circuit[Int](-1, 5, 0.5.seconds)
 
       Future.sequence(for {
         _ <- 1 to 5
       } yield sampleCircuit.executeWithCircuitBreaker(Future(1 / 0)))
 
-      Thread.sleep(1000)
+      Thread.sleep(100)
       sampleCircuit.getCircuitState should be (CircuitState.Open)
-      Thread.sleep(5000)
+      Thread.sleep(500)
+      sampleCircuit.getCircuitState should be (CircuitState.HalfOpen)
+    }
+
+    it("should change from Open to HalfOpen to Closed") {
+      val sampleCircuit: Circuit[Int] = new Circuit[Int](-1, 5, 0.5.seconds)
+
+      Future.sequence(for {
+        _ <- 1 to 5
+      } yield sampleCircuit.executeWithCircuitBreaker(Future(1 / 0)))
+
+      Thread.sleep(100)
+      sampleCircuit.getCircuitState should be (CircuitState.Open)
+      Thread.sleep(500)
       sampleCircuit.getCircuitState should be (CircuitState.HalfOpen)
       sampleCircuit.executeWithCircuitBreaker(Future(2 + 2))
+      Thread.sleep(100)
       sampleCircuit.getCircuitState should be (CircuitState.Closed)
+    }
+
+    it("should change from Open to HalfOpen to Open") {
+      val sampleCircuit: Circuit[Int] = new Circuit[Int](-1, 5, 0.5.seconds)
+
+      Future.sequence(for {
+        _ <- 1 to 5
+      } yield sampleCircuit.executeWithCircuitBreaker(Future(1 / 0)))
+
+      Thread.sleep(100)
+      sampleCircuit.getCircuitState should be (CircuitState.Open)
+      Thread.sleep(500)
+      sampleCircuit.getCircuitState should be (CircuitState.HalfOpen)
+      sampleCircuit.executeWithCircuitBreaker(Future(2/0))
+      Thread.sleep(100)
+      sampleCircuit.getCircuitState should be (CircuitState.Open)
+    }
+
+    it("should switch multiple states as per the flow") {
+      val sampleCircuit: Circuit[Int] = new Circuit[Int](-1, 5, 0.5.seconds)
+
+      Future.sequence(for {
+        _ <- 1 to 5
+      } yield sampleCircuit.executeWithCircuitBreaker(Future(1 / 0)))
+
+      Thread.sleep(100)
+      sampleCircuit.getCircuitState should be (CircuitState.Open)
+      Thread.sleep(500)
+      sampleCircuit.getCircuitState should be (CircuitState.HalfOpen)
+      sampleCircuit.executeWithCircuitBreaker(Future(2 + 2))
+      Thread.sleep(100)
+      sampleCircuit.getCircuitState should be (CircuitState.Closed)
+      Future.sequence(for {
+        _ <- 1 to 5
+      } yield sampleCircuit.executeWithCircuitBreaker(Future(1 / 0)))
+      Thread.sleep(100)
+      sampleCircuit.getCircuitState should be (CircuitState.Open)
+      Thread.sleep(500)
+      sampleCircuit.getCircuitState should be (CircuitState.HalfOpen)
+      sampleCircuit.executeWithCircuitBreaker(Future(2/0))
+      Thread.sleep(100)
+      sampleCircuit.getCircuitState should be (CircuitState.Open)
     }
   }
 }
